@@ -9,6 +9,7 @@ from PIL import Image
 
 
 def tovector(image, k=None):
+    # image -> vector
     data = np.asarray(image, dtype=np.float64)
     if k:
         return data[:,:, k].flatten()
@@ -16,9 +17,10 @@ def tovector(image, k=None):
         return data.flatten()
 
 def tomatrix(images, way='row'):
-    if way == 'row':
+    # image -> matrix
+    if way in {'r', 'row'}:
         return np.row_stack([tovector(image) for image in images])
-    elif way in {'col', 'column'}:
+    elif way in {'c', 'col', 'column'}:
         return np.column_stack([tovector(image) for image in images])
 
 def toimage(vector, size, mode='RGB'):
@@ -30,55 +32,80 @@ def toimage(vector, size, mode='RGB'):
     else:
         return Image.fromarray(vector.reshape(size).astype('uint8')).convert(mode)
 
-from sklearn.preprocessing import FunctionTransformer
-class FiltTransformer(FunctionTransformer):
-    '''Transform images to vectors
-    '''
-    def __init__(self, shape, channels, *args, **kwargs):
-        def func(X):
-            return np.column_stack([np.row_stack([filt(x.reshape(shape), channel).flatten() for x in X])
-                for channel in channels])
-        super(FiltTransformer, self).__init__(func=func, *args, **kwargs)
+# from sklearn.preprocessing import FunctionTransformer
+# class FiltTransformer(FunctionTransformer):
+#     '''Transform images to vectors
+#     '''
+#     def __init__(self, shape, channels, *args, **kwargs):
+#         def func(X):
+#             return np.column_stack([np.row_stack([filt(x.reshape(shape), channel).flatten() for x in X])
+#                 for channel in channels])
+#         super(FiltTransformer, self).__init__(func=func, *args, **kwargs)
 
-    def fit(self, X):
-        """
-        Transform images to vectors
+#     def fit(self, X):
+#         """
+#         Transform images to vectors
 
-        Arguments:
-            X {list|array} -- images or a folder where images are stored
-        """
-        if isinstance(X, pathlib.Path):
-            images = []
-            for f in X.iterdir():
-                try:
-                    img = Image.open(f).resize((200, 200))
-                except IOError:
-                    print("Warning: 没有找到文件 <%s> 或读取文件失败"%f)
-                else:
-                    images.append(img)
-        else:
-            images = X
-        size = images[0].size
-        assert np.all(im.size==size for im in X)
-        return size
+#         Arguments:
+#             X {list|array} -- images or a folder where images are stored
+#         """
+#         if isinstance(X, pathlib.Path):
+#             images = []
+#             for f in X.iterdir():
+#                 try:
+#                     img = Image.open(f).resize((200, 200))
+#                 except IOError:
+#                     print("Warning: 没有找到文件 <%s> 或读取文件失败"%f)
+#                 else:
+#                     images.append(img)
+#         else:
+#             images = X
+#         size = images[0].size
+#         assert np.all(im.size==size for im in X)
+#         return size
 
 
-def get_images(files=[], folder=None, op=None):
-    # files: jpg or jpeg files
+def get_images(files=None, folder=None, op=None, exts=('.jpg','.jpeg','.png')):
+    """[summary]
+    
+    [description]
+    
+    Keyword Arguments:
+        files {List[Path]} -- jpg or jpeg files (default: {None})
+        folder {Path} -- the folder of images (default: {None})
+        op {Function} -- operating each image (default: {None})
+        exts {tuple[str]} -- (default: {('.jpg','.jpeg','.png')})
+    
+    Returns:
+        List[Image] -- list of images
+    
+    Raises:
+        Exception -- Provide files or a folder
+        LookupError -- A file name is invalid
+    """
     images = []
-    if folder:
-        files += [f for f in pathlib.Path(folder).iterdir()]
-    for f in files:  
+    if files:
+        if folder:
+            files += [f for f in pathlib.Path(folder).iterdir()]
+    elif folder:
+        files = pathlib.Path(folder).iterdir()
+    else:
+        raise Exception('Must provide files or a folder')
+
+    for f in files:
         if isinstance(f, str):
             f = pathlib.Path(f)
         if f.suffix == '':
-            f = pathlib.Path(f).with_suffix('.jpg')
-        if f.exists():
-            images.append(Image.open(f))
+            for ext in exts:
+                f = pathlib.Path(f).with_suffix(ext)
+                if f.exists():
+                    images.append(Image.open(f))
+                    break
+        elif f.exists() and f.suffix in exts:
+            im = Image.open(f)
+            images.append(im)
         else:
-            f = f.with_suffix('.jpeg')
-            if f.exists():
-                images.append(Image.open(f))
+            raise LookupError('Invalid file name %s' % f)
 
     if op:
         images = [op(image) for image in images]
@@ -99,14 +126,16 @@ def lrmerge(im1, im2, loc=None):
     xsize2, ysize2 = im2.size
     if loc is None:
         loc = xsize1 // 2
+    elif loc <1:
+        loc = int(xsize1 * loc)
     box1 = (0, 0, loc, ysize1)
     im1 = im1.crop(box1)
     im2.paste(im1, box1)
     return im2
 
 
-def udmerge(im1, im2, loc=None):
-    '''Merge up part of `im1` and down part of `im2`
+def tbmerge(im1, im2, loc=None):
+    '''Merge top part of `im1` and bottum part of `im2`
 
     See also lrmerge
     '''
@@ -114,6 +143,8 @@ def udmerge(im1, im2, loc=None):
     xsize2, ysize2 = im2.size
     if loc is None:
         loc = ysize1 // 2
+    elif loc <1:
+        loc = int(ysize1 * loc)
     box1 = (0, 0, xsize1, loc)
     im1 = im1.crop(box1)
     im2.paste(im1, box1)
@@ -162,6 +193,7 @@ def scale_w(image, width):
     return image.resize((width, h))
 
 def scale_h(image, height):
+    # scale an image according to a fixed height
     w, h = image.size
     w = int(w * height / h)
     return image.resize((w, height))
@@ -317,7 +349,7 @@ class Background:
         self.size = size
         self.mode = mode
 
-    def paste(self, img, coord=(0, 0)):
+    def paste(self, img, coord=(0, 0), scale=None):
         '''Embed a image into the background
         
         Embed an image `img` into the background at coordinate `coord`, 
@@ -328,8 +360,14 @@ class Background:
         
         Keyword Arguments:
             coord {tuple} -- [coordinate] (default: {(0, 0)})
+            scale {int} -- scaling the small image
         '''
         x, y = coord
+        if scale:
+            size = self.size[0] * scale, self.size[1] * scale
+            img = img.resize(size)
+        else:
+            img = img.resize(self.size)
         self.image.paste(img, (x * self.size[0], y * self.size[1]))
 
     def save(self, *args, **kwargs):
@@ -346,12 +384,22 @@ class Background:
         '''
 
         for img, coord in zip(itertools.cycle(imgs), coords):
-            self.paste(img.resize(self.size), coord)
+            self.paste(img, coord)
 
 def patch(imgs, big):
+    """
+    Patch a big image with small images
+
+    Arguments:
+        imgs {List[Image]} -- list of images
+        big {Image} -- big image
+    
+    Returns:
+        an image
+    """
     bg = Background(big.size[1], big.size[0], size=imgs[0].size)
     a = np.asarray(big, dtype=np.float64)
-    means = [np.asarray(img, dtype=np.float64)[:,:,:3].mean(axis=(0,1)) for img in imgs]
+    means = [np.asarray(img, dtype=np.float64).mean(axis=(0,1)) for img in imgs if img.mode=='RGB']
     for i in range(big.size[1]):
         for j in range(big.size[0]):
             p = a[i, j, :]
@@ -399,6 +447,13 @@ class imageOp:
         return ff
 
 
+def cross(image1, image2, func):
+    # as imageOP but it is a binary function
+    a1 = np.asarray(image1, dtype=np.float64)
+    a2 = np.asarray(image2, dtype=np.float64)
+    return Image.fromarray(func(a1, a2).astype('uint8')).convert(image1.mode)
+
+
 def filt(array, channel='a'):
     import pywt  
     if array.ndim == 3:
@@ -410,3 +465,12 @@ def filt(array, channel='a'):
     else:
         wp = pywt.WaveletPacket2D(data=array, wavelet='db1', mode='symmetric')
         return wp[channel].data
+
+# folder=pathlib.Path('/Users/william/Programming/Python/toy/faces/eigen/')
+# images=get_images(folder=folder)
+
+# image=sqstack(images[:6])
+# image.save(folder / '1.jpg')
+# image=sqstack(images[6:])
+# image.save(folder / '2.jpg')
+# 
